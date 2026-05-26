@@ -1,72 +1,41 @@
-/**
- * =====================================================
- * SERVER.JS - StudySync API
- * =====================================================
- * 
- * Punto de entrada principal de la aplicación Express.
- * Configura el servidor, middlewares y monta las rutas.
- * 
- * ARQUITECTURA MVC EN ESTE ARCHIVO:
- * Este archivo funciona como el 'Controller' principal que:
- * - Inicializa Express
- * - Configura middlewares (funciones que procesan requests antes de llegar a los controladores)
- * - Monta las rutas específicas (sessionRoutes)
- * - Define el middleware de errores global
- * 
- * FLUJO DE UNA SOLICITUD HTTP:
- * 1. Request llega al servidor
- * 2. Middleware de parsing JSON procesa el body
- * 3. Router dirige la solicitud al endpoint correcto
- * 4. Controlador procesa la lógica de negocio
- * 5. Response se envía al cliente
- * 6. Si hay error, el middleware de errores lo captura
- * =====================================================
- */
-
 import express from 'express';
 import dotenv from 'dotenv';
+
+// 🚨 ¡MUEVE ESTO AQUÍ ARRIBA! Debe ejecutarse antes de importar el publisher
+dotenv.config(); 
+
 import sessionRoutes from './routes/sessionRoutes.js';
-import { errorHandler } from './controllers/sessionController.js';
+import { errorHandler, joinEvent } from './controllers/sessionController.js';
+import swaggerUi from 'swagger-ui-express';
+import swaggerJsdoc from 'swagger-jsdoc';
+import publisher from './publisher.js'; // Ahora sí leerá la URL perfectamente
 
-// Cargar variables de entorno desde archivo .env
-// Esto permite configurar el puerto sin hardcodearlo
-dotenv.config();
-
-// Crear instancia de Express
-// Express es el framework que maneja el servidor HTTP
 const app = express();
+// ... (el resto del código se queda exactamente igual)
 
-/**
- * MIDDLEWARE: express.json()
- * Permite parsear el cuerpo de las solicitudes en formato JSON
- * Sin esto, req.body estaría vacío en POST/PUT
- * 
- * Este middleware es GLOBAL porque se aplica a todas las rutas
- */
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'StudySync API',
+      version: '1.0.0',
+      description: 'API de coordinación académica con Redis Pub/Sub',
+    },
+    servers: [
+      { url: `http://localhost:${process.env.PORT || 10000}`, description: 'Local' },
+    ],
+  },
+  apis: ['./src/routes/*.js', './src/controllers/*.js'],
+};
+const specs = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
+
 app.use(express.json());
 
-/**
- * ENDPOINT BASE: /api
- * Configuramos un prefijo base para todas las rutas de la API
- * Esto permite tener versioning futuro (/api/v1/)
- */
 const API_PREFIX = '/api';
-
-/**
- * MOUNT ROUTES: /api/sessions
- * Montamos las rutas de sesiones bajo el prefijo /api
- * Ahora todos los endpoints serán /api/sessions/...
- * 
- * Este es el punto donde el Router de Express se conecta al servidor principal
- */
 app.use(`${API_PREFIX}/sessions`, sessionRoutes);
+app.post(`${API_PREFIX}/events/join`, joinEvent);
 
-/**
- * ENDPOINT DE BIENVENIDA: GET /
- * Prueba de que el servidor está funcionando
- * 
- * CÓDIGO 200: El servidor responde correctamente
- */
 app.get('/', (req, res) => {
   res.status(200).json({
     success: true,
@@ -74,40 +43,32 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       sessions: `${API_PREFIX}/sessions`,
-      documentation: 'Ver README.md para más información'
-    }
+      events: `${API_PREFIX}/events/join`,
+      docs: '/api-docs',
+    },
   });
 });
 
-/**
- * MIDDLEWARE DE ERRORES GLOBAL
- * Este middleware se ejecuta cuando cualquier ruta lanza un error
- * Debe definirse AL FINAL de todas las rutas
- * 
- * CÓDIGO 500: Error interno del servidor
- * Captura errores no manejados y responde de forma controlada
- */
 app.use(errorHandler);
 
-/**
- * CONFIGURACIÓN DEL PUERTO
- * Lee la variable PORT del archivo .env
- * Si no existe, usa 3000 como valor por defecto
- */
 const PORT = process.env.PORT || 10000;
 
-/**
- * INICIAR EL SERVIDOR
- * Express comienza a escuchar solicitudes en el puerto configurado
- * 
- * CÓDIGO DE ESTADO: No aplica (el servidor no es una respuesta HTTP)
- */
-app.listen(PORT, () => {
-  console.log(`🚀 StudySync API ejecutándose en el puerto ${PORT}`);
-  console.log(`📚 Documentación: http://localhost:${PORT}`);
-  console.log(`📋 Endpoints disponibles: ${API_PREFIX}/sessions`);
-});
+const startServer = async () => {
+  try {
+    await publisher.connect();
+    const pong = await publisher.ping();
+    console.log(`[Redis] Conexión validada: ${pong}`);
 
-// Exportar app para testing (permite usar supertest sin iniciar el servidor)
-// Esta es una práctica recomendada para testing automatizado
+    app.listen(PORT, () => {
+      console.log(`StudySync API ejecutándose en el puerto ${PORT}`);
+      console.log(`Swagger: http://localhost:${PORT}/api-docs`);
+    });
+  } catch (err) {
+    console.error('[Redis] Error al conectar:', err.message);
+    process.exit(1);
+  }
+};
+
+startServer();
+
 export default app;
