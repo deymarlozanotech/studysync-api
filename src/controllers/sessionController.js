@@ -19,6 +19,8 @@
  * =====================================================
  */
 
+import { publishEvent } from '../publisher.js';
+
 // Arreglo en memoria para persistencia de sesiones de estudio
 // Simula una base de datos sin necesidad de configuración adicional
 const sessions = [];
@@ -139,7 +141,7 @@ export const getSessionById = (req, res) => {
  * - 201 Created: Sesión creada exitosamente
  * - 400 Bad Request: Faltan campos requeridos o datos inválidos
  */
-export const createSession = (req, res) => {
+export const createSession = async (req, res) => {
   try {
     // Extraer datos del cuerpo de la solicitud
     const { subject, topic, scheduledDate, duration, location } = req.body;
@@ -178,6 +180,16 @@ export const createSession = (req, res) => {
 
     // Agregar al arreglo en memoria
     sessions.push(newSession);
+
+    // Publicar evento Redis
+    await publishEvent('study:session:created', 'SESSION_CREATED', {
+      sessionId: newSession.id,
+      subject: newSession.subject,
+      topic: newSession.topic,
+      scheduledDate: newSession.scheduledDate,
+      duration: newSession.duration,
+      location: newSession.location,
+    });
 
     // CÓDIGO 201: Recurso creado exitosamente
     // 201 es el código apropiado para indicar que se ha creado un nuevo recurso
@@ -297,6 +309,28 @@ export const deleteSession = (req, res) => {
       message: 'Error interno del servidor' 
     });
   }
+};
+
+export const joinEvent = async (req, res) => {
+  const { usuario, grupo } = req.body;
+  if (!usuario || !grupo) {
+    return res.status(400).json({
+      success: false,
+      message: 'Faltan campos requeridos: usuario, grupo',
+    });
+  }
+
+  await publishEvent('study:usuario:unido', 'USER_JOINED', {
+    usuario,
+    grupo,
+    momento: new Date().toISOString(),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Usuario ${usuario} unido al grupo ${grupo}`,
+    data: { usuario, grupo },
+  });
 };
 
 /**
