@@ -1,28 +1,43 @@
 {
-  "name": "studysync-api",
+  "name": "campusfix-api",
   "version": "1.0.0",
-  "description": "StudySync API - Plataforma de coordinación académica para gestión de sesiones de estudio",
+  "description": "CampusFix API - Sistema de Reportes de Infraestructura Universitaria en Tiempo Real",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node --env-file=.env src/server.js",
     "dev": "node --watch src/server.js",
-    "subscriber": "node --env-file=.env src/subscriber.js"
+    "subscriber": "node --env-file=.env src/subscriber.js",
+    "build": "prisma generate",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --forceExit"
   },
   "keywords": [
-    "study",
-    "sessions",
-    "academic",
+    "campus",
+    "infrastructure",
+    "reports",
+    "maintenance",
     "api",
     "rest"
   ],
-  "author": "StudySync Team",
+  "author": "DETONEITORS - UPDS",
   "license": "ISC",
   "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.2.0",
     "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.3",
+    "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "prisma": "^6.19.3",
+    "supertest": "^7.2.2"
   }
 }

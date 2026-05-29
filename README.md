@@ -1,25 +1,30 @@
-# StudySync API
+# CampusFix API
 
-Plataforma de coordinación académica para la gestión de sesiones de estudio.
+Sistema de Reportes de Infraestructura Universitaria en Tiempo Real.
 
 ## Descripción del Proyecto
 
-**StudySync** es una API REST que permite gestionar sesiones de estudio académico. Implementa un CRUD completo con arquitectura MVC (Model-View-Controller), utilizando Node.js y Express.
+**CampusFix** es una API REST que permite a estudiantes, personal de mantenimiento y administradores gestionar reportes de daños en instalaciones universitarias. Implementa CRUD completo con autenticación JWT, roles de usuario, caché Redis y publicación/suscripción en tiempo real.
 
-### Entidad: StudySession
-
-Cada sesión de estudio contiene los siguientes campos:
+### Entidad: Reporte
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `id` | Integer | Identificador único (autoincremental) |
-| `subject` | String | Materia de la sesión |
-| `topic` | String | Tema específico a estudiar |
-| `scheduledDate` | DateTime | Fecha y hora programada (ISO 8601) |
-| `duration` | Integer | Duración en minutos |
-| `location` | String | Lugar de la sesión |
-| `createdAt` | DateTime | Fecha de creación (auto-generado) |
-| `updatedAt` | DateTime | Fecha de última actualización (auto-generado) |
+| `id` | Integer | Identificador único |
+| `tipoDano` | String | Tipo de daño reportado |
+| `descripcion` | String | Descripción detallada |
+| `ubicacion` | String | Lugar del daño |
+| `estado` | Enum | PENDIENTE / EN_PROCESO / RESUELTO |
+| `creadoEn` | DateTime | Fecha de creación |
+| `autorId` | Integer | FK al usuario que reporta |
+
+### Roles de Usuario
+
+| Rol | Permisos |
+|-----|----------|
+| `ESTUDIANTE` | Crear reportes, ver listado |
+| `MANTENIMIENTO` | Actualizar estado de reportes |
+| `ADMIN` | Eliminar reportes |
 
 ---
 
@@ -28,222 +33,167 @@ Cada sesión de estudio contiene los siguientes campos:
 ### Base URL
 
 ```
-https://studysync-api-b85v.onrender.com/api/sessions
+https://campusfix-api.onrender.com/api/reportes
 ```
 
-> **Nota**: También disponible localmente en `http://localhost:3000/api/sessions`
+> Local: `http://localhost:3000/api/reportes`
 
-### Listar todas las sesiones
+### Autenticación
 
 ```
-GET /api/sessions
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+POST /api/auth/refresh-token
 ```
 
-**Parámetros de Query (opcionales):**
+### Reportes
+
+| Método | Ruta | Auth | Descripción |
+|--------|------|------|-------------|
+| GET | `/api/reportes` | No | Listar reportes (paginado, filtros) |
+| GET | `/api/reportes/:id` | No | Obtener reporte por ID |
+| POST | `/api/reportes` | Sí | Crear reporte (cualquier rol) |
+| PUT | `/api/reportes/:id` | MANTENIMIENTO | Actualizar estado |
+| DELETE | `/api/reportes/:id` | ADMIN | Eliminar reporte |
+
+> Las rutas también están disponibles en inglés: `/api/reports`
+
+### Parámetros de Query (GET)
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `subject` | String | Filtrar por materia |
-| `topic` | String | Filtrar por tema (búsqueda parcial) |
-| `page` | Integer | Número de página (default: 1) |
-| `limit` | Integer | Elementos por página (default: 5) |
-
-**Ejemplo:**
-```
-GET /api/sessions?subject=Matemáticas&page=1&limit=5
-```
-
-**Respuesta exitosa (200):**
-```json
-{
-  "success": true,
-  "data": [...],
-  "pagination": {
-    "currentPage": 1,
-    "itemsPerPage": 5,
-    "totalItems": 10,
-    "totalPages": 2
-  }
-}
-```
+| `tipoDano` | String | Filtrar por tipo de daño |
+| `estado` | Enum | PENDIENTE / EN_PROCESO / RESUELTO |
+| `page` | Integer | Página (default: 1) |
+| `limit` | Integer | Items por página (default: 5) |
 
 ---
 
-### Obtener sesión por ID
+## Arquitectura del Sistema
 
 ```
-GET /api/sessions/:id
+  CLIENTE (Frontend / curl / Postman / Dashboard Socket.io)
+         │
+         │  HTTPS
+         ▼
+┌──────────────────────────────────────────┐
+│         API GATEWAY                       │
+│   Express 4 + CORS + Helmet              │
+│   + Rate Limiting + Socket.io            │
+│                                           │
+│   /api-docs    ── Swagger UI              │
+│   /api/auth    ── Register / Login        │
+│   /api/reports ── CRUD (inglés)           │
+│   /api/reportes ── CRUD (español)         │
+│   /             ── Dashboard en vivo      │
+└────────┬──────────────┬───────────────────┘
+         │              │
+         ▼              ▼
+┌─────────────────┐  ┌─────────────────────────┐
+│   Supabase      │  │    Upstash Redis         │
+│   (PostgreSQL)  │  │                         │
+│                 │  │  ┌───────────────────┐  │
+│  ┌───────────┐  │  │  │ ★ Caché (TTL 60s)│  │
+│  │  usuario  │  │  │  │   GET /reportes   │  │
+│  ├───────────┤  │  │  └───────────────────┘  │
+│  │  reporte  │  │  │                         │
+│  │  (FK →    │  │  │  ┌───────────────────┐  │
+│  │   usuario)│  │  │  │ ★ Pub/Sub         │  │
+│  └───────────┘  │  │  │   campus:* canales │  │
+│                 │  │  │   → Socket.io      │  │
+│  DATABASE_URL   │  │  └───────────────────┘  │
+│  → puerto 6543  │  │                         │
+│    (pooler)     │  │  ┌───────────────────┐  │
+│  DIRECT_URL     │  │  │ ★ Blacklist JWT   │  │
+│  → puerto 5432  │  │  │   logout tokens   │  │
+│    (directo)    │  │  └───────────────────┘  │
+└─────────────────┘  └─────────────────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  Socket.io     │
+                    │  Dashboard     │
+                    │  (Tiempo Real) │
+                    └────────────────┘
 ```
 
-**Ejemplo:**
-```
-GET /api/sessions/1
-```
+### Canales Pub/Sub
 
-**Respuestas:**
-- **200 OK**: Sesión encontrada
-- **404 Not Found**: El ID no existe
-
----
-
-### Crear nueva sesión
-
-```
-POST /api/sessions
-```
-
-**Cuerpo de la solicitud:**
-```json
-{
-  "subject": "Física",
-  "topic": "Mecánica Clásica",
-  "scheduledDate": "2026-05-20T14:00:00Z",
-  "duration": 120,
-  "location": "Laboratorio de Física"
-}
-```
-
-**Respuestas:**
-- **201 Created**: Sesión creada exitosamente
-- **400 Bad Request**: Faltan campos requeridos o datos inválidos
-
----
-
-### Actualizar sesión
-
-```
-PUT /api/sessions/:id
-```
-
-**Cuerpo de la solicitud (campos opcionales):**
-```json
-{
-  "subject": "Física II",
-  "duration": 90
-}
-```
-
-**Respuestas:**
-- **200 OK**: Sesión actualizada exitosamente
-- **400 Bad Request**: Datos inválidos
-- **404 Not Found**: El ID no existe
-
----
-
-### Eliminar sesión
-
-```
-DELETE /api/sessions/:id
-```
-
-**Respuestas:**
-- **200 OK**: Sesión eliminada exitosamente
-- **404 Not Found**: El ID no existe
+| Canal | Evento | Disparador |
+|-------|--------|------------|
+| `campus:reporte:nuevo` | REPORTE_NUEVO | POST /api/reportes |
+| `campus:estado:actualizado` | ESTADO_ACTUALIZADO | PUT /api/reportes/:id |
 
 ---
 
 ## Instalación y Uso
 
-### Requisitos Previos
+### Requisitos
 
-- Node.js (v14+)
+- Node.js 22+
 - npm
+- Supabase (PostgreSQL)
+- Upstash Redis
 
-### Pasos de Instalación
-
-1. **Clonar el repositorio:**
-   ```bash
-   git clone <repository-url>
-   ```
-
-2. **Instalar dependencias:**
-   ```bash
-   npm install
-   ```
-
-3. **Configurar variables de entorno:**
-   Editar el archivo `.env` y configurar el puerto:
-   ```
-   PORT=3000
-   ```
-
-4. **Iniciar el servidor:**
-   ```bash
-   npm start
-   ```
-
-   Para desarrollo con reinicio automático:
-   ```bash
-   npm run dev
-   ```
-
-5. **Verificar que el servidor funciona:**
-   Visitar `http://localhost:3000`
-
----
-
-## Documentación de Códigos de Estado HTTP
-
-| Código | Significado | Uso en esta API |
-|--------|--------------|-----------------|
-| **200** | OK | Solicitudes exitosas (GET, PUT, DELETE) |
-| **201** | Created | Creación exitosa de recurso (POST) |
-| **400** | Bad Request | Error de validación del cliente |
-| **404** | Not Found | Recurso no encontrado |
-| **500** | Internal Server Error | Error inesperado del servidor |
-
----
-
-## Arquitectura MVC
-
-El proyecto sigue el patrón **MVC (Model-View-Controller)**:
-
-```
-src/
-├── server.js           # Punto de entrada, configura Express y middlewares
-├── controllers/
-│   └── sessionController.js  # Lógica de negocio (operaciones CRUD)
-└── routes/
-    └── sessionRoutes.js      # Definición de endpoints y mapeo a controladores
-```
-
-- **Model**: Estructura de datos de una sesión (arreglo en memoria)
-- **View**: Rutas HTTP que definen los endpoints
-- **Controller**: Funciones que procesan las solicitudes y retornan respuestas
-
----
-
-## URL de Producción
-
-```
-https://studysync-api-b85v.onrender.com/api/sessions
-```
-
----
-
-## Comandos Git (Desarrollo Progresivo)
-
-Los siguientes commits muestran el desarrollo de la API:
+### Instalación
 
 ```bash
-# 1. Configuración inicial del proyecto
-git commit -m "feat: initialize Node.js project with Express and dotenv"
-
-# 2. Implementación del controlador con CRUD completo
-git commit -m "feat: implement study session controller with in-memory storage"
-
-# 3. Creación de rutas y configuración del servidor
-git commit -m "feat: set up Express server with session routes and middleware"
-
-# 4. Añadir filtros y paginación a los endpoints
-git commit -m "feat: add filtering by subject/topic and pagination to GET endpoint"
-
-# 5. Corrección de manejo de errores
-git commit -m "fix: add global error handler middleware and input validation"
+git clone <repo-url>
+cd campusfix-api
+npm install
+npx prisma generate
+npx prisma db push
 ```
+
+### Variables de Entorno (.env)
+
+```
+DATABASE_URL=postgresql://postgres:pass@pooler.supabase.com:6543/postgres?pgbouncer=true
+DIRECT_URL=postgresql://postgres:pass@db.supabase.com:5432/postgres
+REDIS_URL=rediss://default:pass@upstash-redis.com:6379
+JWT_SECRET=your-secret-key
+JWT_EXPIRES_IN=7d
+PORT=3000
+```
+
+### Iniciar
+
+```bash
+npm start          # Servidor principal
+npm run subscriber # Proceso suscriptor Pub/Sub (legacy)
+npm run dev        # Desarrollo con watch
+npm test           # Tests de integración
+```
+
+---
+
+## Justificación de Decisiones Técnicas
+
+**¿Por qué usar el pooler de Supabase (puerto 6543)?**
+Supabase utiliza PgBouncer en el puerto 6543 para manejar conexiones transaccionales, permitiendo multiplexar cientos de conexiones sin agotar recursos de PostgreSQL. La conexión directa (puerto 5432) se reserva exclusivamente para migraciones.
+
+**¿Por qué Redis para caché + Pub/Sub + blacklist?**
+Redis ya estaba integrado para Pub/Sub, por lo que extender su uso a caché (TTL 60s) y blacklist de tokens JWT maximiza la infraestructura existente. La caché evita consultas repetitivas a Supabase, la blacklist permite invalidación inmediata de tokens sin consultas a BD, y Pub/Sub notifica eventos en tiempo real a través de Socket.io.
+
+**¿Por qué dos suscriptores Redis?**
+El `subscriber.js` independiente funciona como proceso legacy para logging y monitoreo. El suscriptor integrado en `server.js` alimenta el bridge de Socket.io para el dashboard en tiempo real, permitiendo que ambos casos de uso operen sin interferencia.
+
+**¿Por qué Express 4 y no Express 5?**
+Express 4 es estable, ampliamente documentado y compatible con Render. Express 5 (beta) introduce breaking changes que podrían causar comportamientos imprevistos en producción.
+
+---
+
+## Dashboard en Tiempo Real
+
+El dashboard se sirve en `http://localhost:3000/` y muestra alertas en vivo para:
+- Nuevos reportes de daño creados
+- Actualizaciones de estado de reportes
+
+Utiliza Socket.io con cliente CDN para conectividad sin bundler.
 
 ---
 
 ## Licencia
 
-ISC © 2026 StudySync Team
+ISC © 2026 CampusFix Team

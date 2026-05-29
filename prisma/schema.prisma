@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+}
+
+enum Rol {
+  ESTUDIANTE
+  MANTENIMIENTO
+  ADMIN
+}
+
+enum EstadoReporte {
+  PENDIENTE
+  EN_PROCESO
+  RESUELTO
+}
+
+model Usuario {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  nombre    String
+  rol       Rol      @default(ESTUDIANTE)
+  creadoEn  DateTime @default(now()) @map("creado_en")
+
+  reportes Reporte[]
+
+  @@map("usuario")
+}
+
+model Reporte {
+  id          Int           @id @default(autoincrement())
+  tipoDano    String
+  descripcion String
+  ubicacion   String
+  estado      EstadoReporte @default(PENDIENTE)
+  creadoEn    DateTime      @default(now()) @map("creado_en")
+
+  autorId Int    @map("autor_id")
+  autor   Usuario @relation(fields: [autorId], references: [id], onDelete: Cascade)
+
+  @@map("reporte")
+}

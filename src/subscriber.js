@@ -1,53 +1,77 @@
 import dotenv from 'dotenv';
-dotenv.config();
-import { Redis } from 'ioredis';
+dotenv.config({ quiet: true });
 
-const REDIS_URL = process.env.REDIS_URL;
-if (!REDIS_URL) {
-  console.error('[Subscriber] REDIS_URL no definida');
-  process.exit(1);
-}
+import Redis from 'ioredis';
 
-const subscriber = new Redis(REDIS_URL, {
-  retryStrategy: (times) => {
-    const delay = Math.min(times * 100, 3000);
-    console.log(`[Subscriber] Reconectando en ${delay}ms (intento ${times})`);
-    return delay;
-  },
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true,
-});
+const subscriber = new Redis(process.env.REDIS_URL);
 
-subscriber.on('connect', () => console.log('[Subscriber] Conectado a Redis'));
-subscriber.on('error', (err) => console.error('[Subscriber] Error:', err.message));
+let heartbeatInterval;
 
-subscriber.psubscribe('study:*', (err, count) => {
-  if (err) return console.error('[Subscriber] Error al suscribirse:', err.message);
-  console.log(`[Subscriber] Suscrito a patrón study:* (${count})`);
-});
+const handleNuevoReporte = (event) => {
+  console.log('\n[REPORTE NUEVO] Nuevo reporte de daño registrado:');
+  console.log(`  Reporte ID: ${event.payload.reporteId}`);
+  console.log(`  Tipo de daño: ${event.payload.tipoDano}`);
+  console.log(`  Ubicación: ${event.payload.ubicacion}`);
+  console.log(`  Descripción: ${event.payload.descripcion}`);
+  console.log(`  Estado: ${event.payload.estado}`);
+};
+
+const handleEstadoActualizado = (event) => {
+  console.log('\n[ESTADO ACTUALIZADO] Estado del reporte modificado:');
+  console.log(`  Reporte ID: ${event.payload.reporteId}`);
+  console.log(`  Tipo de daño: ${event.payload.tipoDano}`);
+  console.log(`  Estado anterior: ${event.payload.estadoAnterior}`);
+  console.log(`  Estado nuevo: ${event.payload.estadoNuevo}`);
+  console.log(`  Actualizado por: ${event.payload.actualizadoPor}`);
+};
+
+subscriber.psubscribe('campus:*');
 
 subscriber.on('pmessage', (pattern, channel, message) => {
   try {
-    const event = JSON.parse(message);
-    console.log(`[Subscriber] Canal: ${channel} | Tipo: ${event.tipo}`);
+      const event = JSON.parse(message);
+    const { tipo, payload } = event;
 
-    if (channel === 'study:session:created') {
-      console.log('[Subscriber] Acción: Disparar alertas WebSockets');
-    } else if (channel === 'study:usuario:unido') {
-      console.log('[Subscriber] Acción: Enviar notificación email');
+    if (!tipo || !payload) {
+      console.log(`[RAW] Evento recibido en canal ${channel}:`, message);
+      return;
     }
-  } catch (err) {
-    console.error('[Subscriber] Error procesando mensaje:', err.message);
+
+    switch (tipo) {
+      case 'REPORTE_NUEVO':
+        handleNuevoReporte(event);
+        break;
+      case 'ESTADO_ACTUALIZADO':
+        handleEstadoActualizado(event);
+        break;
+      default:
+        console.log(`[DESCONOCIDO] Evento tipo '${tipo}' en canal ${channel}:`, message);
+    }
+  } catch {
+    console.log(`[RAW] Mensaje crudo en canal ${channel}:`, message);
   }
 });
 
-setInterval(async () => {
-  try {
-    const res = await subscriber.ping();
-    console.log(`[Subscriber] Heartbeat PING: ${res}`);
-  } catch (err) {
-    console.error('[Subscriber] Heartbeat falló:', err.message);
-  }
-}, 4 * 60 * 1000);
+subscriber.on('connect', () => {
+  console.log('Suscriptor Redis conectado. Escuchando eventos campus:*...');
+});
 
-console.log('[Subscriber] Escuchando canales study:*...');
+subscriber.on('error', (err) => {
+  console.error('Error en suscriptor Redis:', err.message);
+});
+
+heartbeatInterval = setInterval(() => {
+  subscriber.ping().catch(() => {});
+}, 240000);
+
+const gracefulShutdown = () => {
+  console.log('\nCerrando suscriptor...');
+  clearInterval(heartbeatInterval);
+  subscriber.disconnect();
+  process.exit(0);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+console.log('Subscriber de CampusFix iniciado...');

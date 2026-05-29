@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'StudySync API - Infraestructura simulada para LocalStack'
+
+Resources:
+  StudySyncStorage:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: studysync-storage
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+
+  StudySyncConfig:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: StudySyncConfig
+      AttributeDefinitions:
+        - AttributeName: ConfigId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ConfigId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5

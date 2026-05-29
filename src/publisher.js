@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ quiet: true });
 import { Redis } from 'ioredis';
 
 const REDIS_URL = process.env.REDIS_URL;
